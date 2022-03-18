@@ -1,0 +1,1371 @@
+---
+title: "Analysis of Factors Impacting the Number of Deaths in Major Earthquakes since 1967"
+author: "Yen Sun (ys2), Yuting Sheng(ys29), Nimi Wang(nw7), Pei Yin Yang(py6), (Group 2)"
+output: pdf_document
+fontsize: 10pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{color}
+  - \usepackage{colortbl}
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+```{r, echo = F}
+rm(list=ls())
+```
+
+# I. Introduction
+
+Earthquakes can cause billions of dollars in property damage and the loss of human life and injuries$^{1}$. It is very hard to predict devastating earthquakes and impossible to prevent earthquakes from happening. However, we wondered if there is any mean that human can do to reduce the death toll and property damage caused by earthquakes. To answer this question, we examined number of deaths and some factors which would affect the death toll. We started with some straightforward factors including earthquake magnitude, depth and property damage and we concluded that there should be other important factors which influence the death toll. We then turned our focus to GDP per capita. Our results show that, in general, for countries with higher GDP per capita, the death toll was less than which of those countries with lower GDP per capita. We further normalized the death toll by a population factor and demonstrated that this normalization could be helpful for data interpretation. Finally, we investigated the correlation between the death toll, GDP per capita and the seismic building code. Our results suggest that well-enforced seismic building codes is an important factor to reduce the death toll. We believe our results can be helpful to better understand the death toll caused by earthquakes and provide possible suggestions to reduce the deaths. 
+ 
+# II. Dataset description and data processing
+    
+We had two sets of earthquake data. First dataset contains better method to determine earthquake magnitude and second dataset contains death toll and property damage information. Hence, we combined two datasets. First dataset was downloaded from National Earthquake Information Center (NEIC)$^{2}$ which include earthquakes with a reported magnitude 5.5 or higher since 1965. Second dataset was downloaded from National Oceanic and Atmospheric Administration (NOAA)$^{3}$. We selected the events between 1967 to 2017 with magnitude bigger than 5.0 and caused more than one death. The dataset of country GDP per capita (GDP, constant 2000 US dollar) was downloaded by using the R package "WDI" from The World Bank (TWB) $^{4}$. Population density (PD, people per sq. km of land area) dataset also downloaded from The World Bank (TWB) $^{4}$. Finally, the data which includes the position of the earthquake event relative to the nearby big cities (with population) was obtained from United States Geological Survey (USGS) website $^{5}$. Table 1 shows the dimension of original datasets.
+ 
+ DataSet       Number of observations      Number of variables
+---------     -----------------------     --------------------
+     NEIC                     23412                         27
+     NOAA                      5965                         47
+  TWB(GDP)                    13200                          4
+   TWB(PD)                      265                         62
+      
+Table: Dimension of the original datasets.
+      
+We first imported datasets and saved as .sqlite file (SQLite database). Then we selected the events between 1967 to 2017 with magnitude larger than 5.0 and caused more than one death from NOAA data and saved the selected data as a new table in .sqlite file. We later combined earthquake data from NEIC with data from NOAA based on the date and time of earthquakes. As for the GDP per capita dataset, we took either the average of GDP per capita from 1967 to 2017 or GDP per capita in 2016 for each country. We combined the earthquake data with GDP data/population data based on each country. The data processes were done with SQL queries.
+
+```{r, include=FALSE, cache = FALSE}
+#install.packages("rworldmap")
+#install.packages("RSQLite")
+#install.packages("lubridate")
+#install.packages("ggrepel")
+#install.packages("jpeg")
+
+library(rworldmap)
+library(RSQLite)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(WDI)
+library(lubridate)
+library(ggrepel)
+library(jpeg)
+library(scales)
+setwd("~/Desktop/R HW/final")
+# EQ01 <- read_csv("earthquakeData.csv")
+# EQdata0 <- read_tsv("signif.tsv")
+# #EQdata <- filter(EQdata0, YEAR >= 1967 & DEATHS >= 1 & EQ_PRIMARY >= 5.0)
+# GDP01 <-  rename(WDI(indicator='NY.GDP.PCAP.KD', country="all", start=1967, end=2017), "gdp" = NY.GDP.PCAP.KD)
+# PD <- read_csv("population_density.csv", skip = 3)
+# EQ_PD_in_2 <-  read_csv("EQ_PD_in_2.csv")
+# EQ_PD_in_2 <- rename(EQ_PD_in_2, "XXXX" = X1)
+# Ctr_posi0 <- read_csv("country.csv")
+
+
+img <- readJPEG("building.jpg")
+jpg <- readJPEG("map.jpg")
+
+
+```
+
+
+```{r, include=FALSE, cache = FALSE}
+dcon <- dbConnect(SQLite(), dbname = "TotalData2.db")
+
+# dbWriteTable(conn = dcon, name = "EQ_NEIC", EQ01,
+#              append = TRUE, row.names = FALSE)
+# dbWriteTable(conn = dcon, name = "EQ_NOAA", EQdata0,
+#              append = TRUE, row.names = FALSE)
+# dbWriteTable(conn = dcon, name = "GDP", GDP01,
+#              append = TRUE, row.names = FALSE)
+# dbWriteTable(conn = dcon, name = "PD", PD,
+#              append = TRUE, row.names = FALSE)
+# dbWriteTable(conn = dcon, name = "EQ_PD_in_2", EQ_PD_in_2,
+#              append = TRUE, row.names = FALSE)
+# dbWriteTable(conn = dcon, name = "Ctr_posi0", Ctr_posi0,
+#              append = TRUE, row.names = FALSE)
+
+
+res <- dbSendQuery(conn = dcon, "
+SELECT *
+     FROM EQ_NOAA
+     WHERE YEAR >= 1967 AND DEATHS >= 1 AND EQ_PRIMARY >= 5.0
+     ")
+tt <- dbFetch(res, -1)
+dbClearResult(res)
+
+query <- "
+     DROP TABLE IF EXISTS EQ_NOAA_S1 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+dbWriteTable(conn = dcon, name = "EQ_NOAA_S1", tt,
+             append = TRUE, row.names = FALSE)
+```
+
+# III. Results and Discussion
+
+## Worldwide earthquake distribution
+Firstly, we wanted to investigate the worldwide distribution of the earthquakes. Figure 1 (Bottom) shows worldwide earthquakes with magnitude bigger than 5.5 since 1965 as red small dots. Comparing with the plate boundaries map$^{6}$ (figure 1, Top), we can see that a lot of earthquakes occurred on the boundary of the plate as suggested by previous publications $^{7}$. The red dots in figure 1 (Bottom) are in excellent agreement with the red line in figure 1 (Top). We then plotted major earthquakes whose magnitude bigger than 7.0 and caused at least one death since 1965 (figure 1, Bottom, details refer to figure caption). From this map we noticed that for many countries sited near the plate boundaries, for example, Iran, Japan, Indonesia, Chile suffered much more earthquakes than some other countries. We wondered by investigating the death toll against different factors, whether we can provide some suggestions to these countries to reduce deaths caused by earthquakes.
+
+ 
+```{r, echo=F, out.width='100%'}
+#knitr::include_graphics('map.jpg')
+```
+
+```{r, echo=F}
+res <- dbSendQuery(conn = dcon, "
+SELECT *
+     FROM EQ_NEIC
+     ")
+out0 <- dbFetch(res, -1)
+dbClearResult(res)
+```
+
+
+```{r Fig1,echo=F,fig.width = 9, fig.height = 4.7,fig.align='center'}
+
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, DEATHS,COUNTRY, LONGITUDE,LATITUDE, EQ_PRIMARY
+FROM EQ_NOAA
+WHERE EQ_PRIMARY >= 7.0 AND DEATHS >= 1 AND DEATHS < 100 AND YEAR >= 1965
+ORDER BY DEATHS DESC;
+")
+out5 <- dbFetch(res, -1)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, DEATHS,COUNTRY, LONGITUDE,LATITUDE, EQ_PRIMARY
+FROM EQ_NOAA
+WHERE EQ_PRIMARY >= 7.0 AND DEATHS >= 100 AND DEATHs <1000 AND YEAR >= 1965
+ORDER BY DEATHS DESC;
+")
+out6 <- dbFetch(res, -1)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, DEATHS,COUNTRY, LONGITUDE,LATITUDE, EQ_PRIMARY
+FROM EQ_NOAA
+WHERE EQ_PRIMARY >= 7.0 AND DEATHS >= 1000 AND DEATHS < 10000 AND YEAR >= 1965
+ORDER BY DEATHS DESC;
+")
+out7 <- dbFetch(res, -1)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, DEATHS,COUNTRY, LONGITUDE,LATITUDE, EQ_PRIMARY
+FROM EQ_NOAA
+WHERE EQ_PRIMARY >= 7.0 AND DEATHS >= 10000 AND YEAR >= 1965
+ORDER BY DEATHS DESC;
+")
+out8 <- dbFetch(res, -1)
+dbClearResult(res)
+
+require(grid)
+mapWorld1 <- borders("world", colour="white") 
+mp1 <- ggplot() + theme_void()+ mapWorld1
+g <- rasterGrob(jpg, interpolate=TRUE)
+map1 <- mp1+annotation_custom(g, xmin=-200, xmax=200, ymin=-120, ymax=150)
+
+mapWorld2 <- borders("world", colour="black")
+mp2 <- ggplot() + theme_void()+ mapWorld2
+map2 <- mp2 +
+  geom_point(aes(x=out0$Longitude, y=out0$Latitude) ,
+                     color="red", size=0.2) +
+  geom_point(aes(x=out5$LONGITUDE, y=out5$LATITUDE) ,
+             color="blue", size=1.5) +
+  geom_point(aes(x=out6$LONGITUDE, y=out6$LATITUDE) ,
+             color="cyan", size=1.5) +
+  geom_point(aes(x=out7$LONGITUDE, y=out7$LATITUDE) ,
+             color="olivedrab1", size=1.5) +
+  geom_point(aes(x=out8$LONGITUDE, y=out8$LATITUDE) ,
+             color="green", size=1.5)
+vp1 <- viewport(x = 0.5, y = 0.25, width = 0.5, height = 0.5)
+vp2 <- viewport(x = 0.5, y = 0.75, width = 0.5, height = 0.5)
+grid.newpage()
+print(map1, vp = vp2)
+print(map2, vp = vp1)
+```
+\begin{figure}[htbp]
+\centering
+\caption{(Top) Worldwide map showing plate boundaries (red lines). Figure was adapted from reference 6. (Bottom) Worldwide distribution of earthquakes with magnitude bigger than 5.5 since 1965 (red dots). Earthquakes with magnitude larger than 7.0 since 1965: blue circle: 1$\leq$deaths<100, cyan circle:100$\leq$deaths<1000, olive circle: 1000$\leq$deaths<10000, green circle: 10000$\leq$deaths. \label{Fig1}}
+\end{figure}
+
+```{r, include=FALSE, cache = FALSE}
+
+query <- "
+     DROP TABLE IF EXISTS EQ_NEIC_02 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+query <- "
+     CREATE TABLE EQ_NEIC_02 AS
+     SELECT *, substr(Date,7)||'-'||substr(Date,1,2)||'-'||substr(Date,4,2) as dt
+     FROM EQ_NEIC 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+query <- "
+     DROP TABLE IF EXISTS EQ_NEIC_03 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+query <- "
+     CREATE TABLE EQ_NEIC_03 AS
+     SELECT *, strftime('%Y', dt) as Year,strftime('%m', dt) as Month, 
+     strftime('%d', dt) as Day, time(Time, 'unixepoch'), 
+     strftime('%H',time(Time, 'unixepoch')) as Hour,  
+     strftime('%M',time(Time, 'unixepoch')) as Minute
+     FROM EQ_NEIC_02 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+
+query <- "
+     DROP TABLE IF EXISTS EQ_NEIC_04 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+
+query <- "
+     CREATE TABLE EQ_NEIC_04 AS
+     SELECT *, Year * 100000000 + Month * 1000000 + Day * 10000 + Hour*100 + Minute as Code
+     FROM EQ_NEIC_03 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+######!!
+res <- dbSendQuery(conn = dcon, "
+SELECT *
+     FROM EQ_NOAA
+     ")
+EQdata0 <- dbFetch(res, -1)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT *
+     FROM PD
+     ")
+PD <- dbFetch(res, -1)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT *
+     FROM EQ_PD_in_2
+     ")
+EQ_PD_in_2 <- dbFetch(res, -1)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT *
+     FROM Ctr_posi0
+     ")
+Ctr_posi0 <- dbFetch(res, -1)
+dbClearResult(res)
+###!!!
+
+query <- "
+     DROP TABLE IF EXISTS EQ_NOAA_01 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+
+query <- "
+     CREATE TABLE EQ_NOAA_01 AS
+     SELECT *, YEAR * 100000000 + MONTH * 1000000 + DAY * 10000 + HOUR *100 +  MINUTE as Code
+     FROM EQ_NOAA_S1
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+query <- "
+     DROP TABLE EQ_NEIC_02 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+query <- "
+     DROP TABLE EQ_NEIC_03 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+CREATE TABLE EQ_Join AS
+SELECT *
+FROM EQ_NOAA_01 AS a
+LEFT JOIN EQ_NEIC_04 AS b
+ON a.code = b.code;
+")
+dbClearResult(res)
+
+
+res <- dbSendQuery(conn = dcon, "
+SELECT *
+FROM EQ_Join;
+")
+Join <- dbFetch(res, -1)
+dbClearResult(res) 
+Join <- transform(Join, MAG = ifelse(!is.na(Magnitude), Magnitude, EQ_PRIMARY))
+Join <- Join[!duplicated(Join['I_D']),]
+
+query <- "
+     DROP TABLE IF EXISTS EQ_JOIN_02 
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+dbWriteTable(conn = dcon, name = "EQ_JOIN_02", Join,
+             append = TRUE, row.names = FALSE)
+query <- "
+     DROP TABLE EQ_Join
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+```
+
+## Death toll analysis
+
+After combining two earthquake datasets, we selected the variables we were interested in: YEAR, FOCAL_DEPTH (earthquake depth in km), MAG (magnitude of the earthquakes), DAMAGE_MILLIONS_DOLLARS (damage in millions dollars), DEATHS and COUNTRY. Our first approach was to gain more understanding about earthquake death toll, hence we would analyze death toll against different parameters.  
+
+
+```{r, echo=F}
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, FOCAL_DEPTH,MAG,DEATHS,COUNTRY, DAMAGE_MILLIONS_DOLLARS
+FROM EQ_JOIN_02
+ORDER BY DEATHS DESC;
+")
+out1 <- dbFetch(res, -1)
+dbClearResult(res)
+out2 <- out1
+out2 <- rename(out2, "Year" = YEAR,"Focal depth(km)" = FOCAL_DEPTH, "Magnitude" = MAG,
+         "Death Toll" = DEATHS, "Country" = COUNTRY, "Damage (millions dollars)" =              DAMAGE_MILLIONS_DOLLARS)
+```
+
+## (1)Death toll v.s Earthquake magnitude
+The most straightforward thought is to correlate death toll to magnitude of earthquakes. Earthquake magnitude is a base-10 logarithmic scale which means an earthquake with magnitude 7.0 has a shaking amplitude 10 times greater than an earthquake with magnitude 6.0. Therefore, we expected that there would be more death for earthquakes with larger magnitude. In figure 2(A), we plotted all the data with magnitude bigger to 5 as black dots and averaged all the data points for each magnitude (red circles). We found that as the red circles presenting the mean of the death toll at different magnitudes, there seems to be a positive correlation between the earthquake magnitude and the death toll. As the magnitude of the earthquake increases, the death toll tends to increase. However, the data is very scattered and the death toll can be very different for earthquakes with same magnitude. Since there are only several data points for earthquake magnitude > 8.0, hence, the mean result (red circles) may not be very reliable in this region.
+
+## (2) Death toll v.s Earthquake depth
+Secondly, we tried to analyze the relationship between the depth of earthquakes and the death toll. In theory, the shallow earthquakes tend to cause more damage than deep ones. Hence, we expected to see a inverse correlation between death toll and focal depth. The death toll was plotted against the focal depth of the earthquakes as black dots (figure 2(B)). However, the correlation is not very clear from our data. We fitted a linear regression and got the R square equals to a very small number (0.000775). Even though we didn't see obvious relation between death toll and earthquake depth, we still decided to keep this figure, because it told us that the reasons which cause high death rate may be much more complicated than we thought.
+
+## (3) Death toll v.s Damage (in millions dollars) 
+Thirdly, we wanted to investigate the relationship between the dollar amount damage caused by earthquakes and the number of casualty in earthquakes. In general, bigger earthquakes should cause more deaths and also more property damage. We plotted the death toll against the property damage (in millions dollars) as black dots (figure 2(C)). To better understand the graph, we added a regression line on graph with a R-squared statistic (=0.634). We can see that the general trend of the dots on the graph follows the direction of the regression line: with more death in the incidence of an earthquake, there is generally more dollar amount of damage caused. However, there are some outliers, but relatively minor. This plot proves our hypothesis that earthquakes with more casualty usually come with more dollar amount damage. Notice that in our original dataset, many earthquake records with smaller magnitudes do not include property damage information.  
+
+
+## (4) Death toll v.s GDP per capita
+
+All the results we got so far suggest that there should be other factors which influence the death toll. From figure 2A, we observed that even though in general there is a positive correlation between magnitude of the earthquake and number of death but there are still a lot of exceptions. The deaths can be very different for the earthquakes with the same magnitude. Furthermore, the negative correlation between the death toll and depth of the earthquakes is very small (figure 2B). Because of these, we then turned our focus to the GDP per capita of countries. Our hypothesis was that when the GDP per capita is high (better developed)$^{8}$ , the government can provide more funding on earthquake preparedness. Moreover, the developed countries may have more strict seismic building codes. Then the death toll would be less.
+
+
+```{r Fig2A, echo=F}
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, FOCAL_DEPTH,MAG,DEATHS,COUNTRY, DAMAGE_MILLIONS_DOLLARS, avg(DEATHS) as average_death2
+FROM EQ_JOIN_02
+WHERE MAG IS NOT NULL
+GROUP By MAG
+ORDER BY DEATHS DESC;
+")
+EQ_select1 <- dbFetch(res, -1)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, FOCAL_DEPTH,MAG,DEATHS,COUNTRY, DAMAGE_MILLIONS_DOLLARS,FLAG_TSUNAMI
+FROM EQ_JOIN_02
+WHERE MAG IS NOT NULL
+ORDER BY DEATHS DESC;
+")
+out3 <- dbFetch(res, -1)
+dbClearResult(res)
+out3_2 <- mutate(out3, MAG2= as.numeric(MAG))
+A <- ggplot() +
+  theme_bw()+
+  geom_point(data = out3,
+                aes(x=as.numeric(MAG), y=DEATHS), alpha = 0.5) +
+  geom_point(data = EQ_select1, 
+             aes(x = as.numeric(MAG), y= average_death2), 
+             color = "red", size=3,alpha = 0.5) +
+  geom_line(data = EQ_select1, 
+             aes(x = as.numeric(MAG), y= average_death2), 
+             color = "red")+
+scale_y_log10(labels = scales::comma) +
+     ggtitle("A") +
+     labs(x="Earthqauke Magnitude",
+          y=expression(paste("Death Toll"," ","(scale of log"[10],")")),
+          colour="") +
+  theme(plot.title = element_text(hjust = -0.03),
+        plot.caption = element_text(size = 12,face = "bold"))
+
+out3_2 <- mutate(out3, MAG2= as.numeric(MAG))
+spearman0_1 <- cor(out3_2$MAG2,out3_2$DEATHS,method ="spearman")
+spearman_test0_1 <- cor.test(out3_2$MAG2,out3_2$DEATHS,method ="spearman")
+```
+
+```{r Fig2B, echo=F, cache = FALSE}
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, FOCAL_DEPTH,MAG,DEATHS,COUNTRY, DAMAGE_MILLIONS_DOLLARS,FLAG_TSUNAMI
+FROM EQ_JOIN_02
+WHERE FOCAL_DEPTH IS NOT NULL
+ORDER BY DEATHS DESC;
+")
+EQ_select <- dbFetch(res, -1)
+dbClearResult(res)
+
+deaths.lm = lm(DEATHS ~ FOCAL_DEPTH, data = EQ_select)
+tt <- summary(deaths.lm)$r.squared
+
+B <- ggplot(EQ_select,aes(x=FOCAL_DEPTH, y=DEATHS)) +
+  geom_point(shape = 1) + 
+  geom_smooth(method = "lm", col="red")+
+  annotate("text", label = "R^{2}==0.000775", 
+           x = 175, y = 110000, size = 4, colour = "black",parse = TRUE)+
+  scale_y_log10(labels = scales::comma) +
+     scale_x_continuous(limits = c(0,200)) + 
+     labs(x = "Focal Depth (km)",
+          y=expression(paste("Death Toll"," ", 
+                             "(scale of log"[10],")")),
+     title = "B") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = -0.03),
+        plot.caption = element_text(size = 12,face = "bold"))
+
+spearman0_2 <- cor(EQ_select$FOCAL_DEPTH,EQ_select$DEATHS,method ="spearman")
+spearman_test0_2 <- cor.test(EQ_select$FOCAL_DEPTH,EQ_select$DEATHS,method ="spearman")
+```
+
+```{r Fig2, echo=F, fig.width=10,fig.height=6.67}
+require(grid)
+res <- dbSendQuery(conn = dcon, "
+SELECT YEAR, FOCAL_DEPTH,MAG,DEATHS,COUNTRY, DAMAGE_MILLIONS_DOLLARS,FLAG_TSUNAMI
+FROM EQ_JOIN_02
+WHERE DAMAGE_MILLIONS_DOLLARS IS NOT NULL
+ORDER BY DEATHS DESC;
+")
+out3 <- dbFetch(res, -1)
+dbClearResult(res)
+
+deaths.lm = lm(DEATHS ~ DAMAGE_MILLIONS_DOLLARS, data = out3)
+tt <- summary(deaths.lm)$r.squared
+
+C <- ggplot(data = out3,
+                aes(x=as.numeric(DAMAGE_MILLIONS_DOLLARS), y=DEATHS)) +
+  geom_point() + 
+  geom_smooth(method = "lm", col="red")+
+  annotate("text", label = "R^{2}==0.634", 
+           x = 20000, y = 3, size = 4, colour = "black",parse = TRUE)+
+  theme_bw()+
+     scale_y_log10(labels = scales::comma) +
+     scale_x_log10(labels = scales::comma) +
+     ggtitle("C") +
+  labs(x=expression(paste("Damage in Millions Dollars", "(scale of log"[10],")")), y=expression(paste("Death Toll", " ", "(scale of log"[10],")")))+
+  theme(plot.title = element_text(hjust = -0.03))
+
+
+##layout
+vp1 <- viewport(x = 0.5, y = 0.75, width = .5, height = 0.5)
+vp2 <- viewport(x = 0.25, y = 0.25, width = .5, height = 0.5)
+vp3 <- viewport(x = 0.75, y = 0.25, width = .5, height = 0.5)
+print(A, vp = vp1)
+print(B, vp = vp2)
+print(C, vp = vp3)
+```
+\begin{figure}[htbp]
+\centering
+\caption{(A)Death toll plot against earthquake magnitude. The average deaths for each magnitude were plotted as red circles. The earthquake data with magnitude bigger than 5 were plot as black dots. (B)Death toll plot against earthquake depth. The earthquake data with magnitude bigger than 5 were plot as black circles, regression line as red line. (C)Death toll plot against damage in millions dollars. The earthquake data with magnitude larger than 5 were plot as black dots, regression line as red line. \label{Fig2}}
+\end{figure}
+
+Based on our hypothesis, we wanted to test whether a more developed country tends to have less death toll. Since we intended to focus on major earthquakes, we selected the events with magnitude at least 6.0, at least one death and at least 50 in damage (in million dollar). We used 50 million dollars as the threshold based on reference 9. For earthquakes larger than magnitude 5.5, the median damage is ~500 million dollars so that we decided to use 10% of this value as the threshold. We used the GDP per capita as the indicator for the country's degree of development. In figure 3, we plotted the death toll against 2016 GDP per capita for each selected event and labeled the country name right next to the data point. In figure 3 we can see a general trend when GDP per capita increases, the death toll tends to decrease. To further confirm this negative correlation, the Spearman's rank correlation coefficient (Spearman's rho) was calculated. We decided to use Spearman's rho because the correlation doesn't seem to be a linear correlation. Spearman's rho is used to measure the rank correlation, in other words, to measure how well the relationship between two variables can be described by a monotonic function. The Spearman's rho for the dataset shown in figure 3 is -0.5100 and the p-value is 7.0e-08. Generally speaking, for Spearman's rho between -0.5 to -0.3 or 0.3 to 0.5 is considered as moderate correlation.$^{10}$ Also, since the p-value is also small, we can say that the death toll and GDP per capita has a negative correlation.  
+
+
+After confirming the negative correlation, we further aggregated the dataset based on each country because in the later part of this project we would analyze the data based on individual country. Both the GDP per capita from 1967 to 2016 and death toll for each country were averaged. Then the earthquake data was combined with GDP data based on each country. Finally, we plotted average deaths v.s average GDP/capita for each country. In figure 4, the color of the dots represents the earthquake magnitude. We also labeled the country name right next to the data point. In this figure, we can see that, for example, Haiti, Pakistan and China, who have relatively low GDP per capita, suffered a lot from more deaths, whereas Greece, New Zealand and USA have much higher GDP with less deaths. Though we still cannot explain every country on the figure 4, we did think we were one step closer to a thorough analysis. One factor that we thought is important but has not been incorporated into consideration is the distance from the earthquake epicenter to big cities with high population. We would further include this consideration in part (6).
+
+```{r, fig.width = 10, fig.height = 6,echo=F}
+res <- dbSendQuery(conn = dcon, "
+SELECT COUNTRY, DEATHS, MAG, DAMAGE_MILLIONS_DOLLARS, YEAR
+FROM EQ_JOIN_02
+WHERE MAG >= 6 AND DEATHS > 1
+")
+EQ_test <- dbFetch(res, -1)
+dbClearResult(res)
+EQ_test <- mutate(EQ_test, dam = as.numeric(DAMAGE_MILLIONS_DOLLARS))
+EQ_test <- filter(EQ_test, dam > 50)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT upper(country) as COUNTRY, gdp as gdp2016
+FROM GDP
+WHERE year==2016
+GROUP BY country
+ORDER BY gdp2016 DESC
+")
+GDP2016 <- dbFetch(res, -1)
+dbClearResult(res)
+
+EQ_GDP2016_2 <- filter(full_join(EQ_test, GDP2016, by = "COUNTRY"),!is.na(DEATHS))
+EQ_GDP2016_2[EQ_GDP2016_2$COUNTRY == "USA",7] =  GDP2016[GDP2016$COUNTRY == "UNITED STATES",2]
+EQ_GDP2016_2[EQ_GDP2016_2$COUNTRY == "RUSSIA",7] =  
+     GDP2016[GDP2016$COUNTRY == "RUSSIAN FEDERATION",2]
+EQ_GDP2016_2[EQ_GDP2016_2$COUNTRY == "AZORES (PORTUGAL)",7] =  
+     GDP2016[GDP2016$COUNTRY == "PORTUGAL",2]
+EQ_GDP2016_2[EQ_GDP2016_2$COUNTRY == "SERBIA AND MONTENEGRO",7] =  
+     GDP2016[GDP2016$COUNTRY == "SERBIA",2]
+EQ_GDP2016_2[EQ_GDP2016_2$COUNTRY == "YEMEN",7] =  
+     GDP2016[GDP2016$COUNTRY == "YEMEN, REP.",2]
+EQ_GDP2016_2[EQ_GDP2016_2$COUNTRY == "TAIWAN",7] =  22540.00
+EQ_GDP2016_2[EQ_GDP2016_2$COUNTRY == "IRAN",7] =  4899.68
+EQ_GDP2016_2 <- filter(EQ_GDP2016_2,!is.na(gdp2016))
+
+```
+
+```{r Fig3,fig.width = 7.2, fig.height = 5.4, echo=F}
+require(grid)
+
+#EQ_GDP <- filter(EQ_GDP,Ave_dam>=1000)
+
+ggplot(EQ_GDP2016_2,aes(x=gdp2016, y=DEATHS, label=COUNTRY, colour = MAG)) + 
+  theme_bw()+
+     geom_point(aes(color = MAG), size=2.5) + 
+     geom_text_repel(aes(label=COUNTRY),size=1.6, fontface="bold", colour = "black",segment.alpha = 0.6,force=2.5,box.padding = 0.2) +
+     scale_y_log10(labels = scales::comma) + 
+  scale_x_continuous(labels = scales::comma)+
+  scale_colour_gradient(low="gold", high="blue") +
+     ggtitle("Death Toll v.s GDP / Capita") +
+     xlab("GDP per Capita (2016)") +
+     ylab(expression(paste("Death Toll"," ", "(scale of log"[10],")"))) +
+     labs(colour = "Magnitude") 
+
+
+# g2 = ggplot(EQ_GDP2016_2,aes(x=gdp2016, y=DEATHS, label=COUNTRY, colour = MAG)) + 
+#      geom_point(aes(color = MAG), size=2) + 
+#      scale_y_log10() + scale_colour_gradientn(colours = terrain.colors(10)) +
+#      scale_x_continuous(limits = c(0,18000)) +
+#      theme(legend.position="none",axis.title.x=element_blank(),
+#       axis.title.y=element_blank()) 
+# 
+# vp1 <- viewport(width = 0.36, 
+#                height = 0.39, 
+#                x = 0.54, 
+#                y = 0.75)
+# print(p2)
+# print(g2, vp = vp1)
+spearman01 <- cor(EQ_GDP2016_2$DEATHS,EQ_GDP2016_2$gdp2016,method ="spearman")
+spearman_test01 <- cor.test(EQ_GDP2016_2$DEATHS,EQ_GDP2016_2$gdp2016,method ="spearman")
+```
+\begin{figure}[htbp]
+\centering
+\caption{Death toll plot against GDP per capita in 2016. Color represents the magnitude of the earthquake. Names of countries as labeled. In this figure, the death toll tends to decrease when GDP per capita increase. The Spearman's rank correlation coefficient is -0.5100 and the p-value is 7.0e-08. \label{Fig3}}
+\end{figure}
+
+The Spearman's rho is -0.5493 and the p-value is 0.000925 for this plot. This result and the trend in figure 4 further confirm that for individual country with higher GDP per capita tends to suffer less death from the earthquake disaster. However, one should be cautious when interpret the Spearman's rho for this case since Spearman rank correlation test should be applied to non-aggregate data. In this case, we used it to calculate the aggregated dataset. Our intention to perform the Spearman correlation test is to investigate whether there is a negative correlation between country's degree of development and average death toll. In this case, we would not focus too much on the exact value of rho. What's important here is that both the non-aggregated data (figure 3, $\rho$ = -0.5100 ) and aggregated data (figure 4, $\rho$ = -0.5493) shows a negative correlation between the death toll and the GDP per capita. 
+
+  
+
+```{r, echo=F}
+# GDP 50 year average
+
+
+out_eq <- group_by(EQ_test, COUNTRY) %>%
+summarise(Ave_death = mean(DEATHS, na.rm=TRUE), Ave_mag = mean(MAG, na.rm=TRUE), Ave_dam = mean(dam, na.rm=TRUE))
+
+
+res <- dbSendQuery(conn = dcon, "
+SELECT upper(country) as COUNTRY, avg(gdp) as Ave_gdp
+FROM GDP
+WHERE 1967<=year AND year<=2017
+GROUP BY country
+ORDER BY Ave_gdp DESC
+")
+out_gdp <- dbFetch(res, -1)
+dbClearResult(res)
+
+## SQLite is not supporting Full join, so we do it with R
+EQ_GDP <- filter(full_join(out_eq, out_gdp, by = "COUNTRY"),!is.na(Ave_death))
+EQ_GDP[EQ_GDP$COUNTRY == "USA",5] =  out_gdp[out_gdp$COUNTRY == "UNITED STATES",2]
+EQ_GDP[EQ_GDP$COUNTRY == "RUSSIA",5] =  
+     out_gdp[out_gdp$COUNTRY == "RUSSIAN FEDERATION",2]
+EQ_GDP[EQ_GDP$COUNTRY == "AZORES (PORTUGAL)",5] =  
+     out_gdp[out_gdp$COUNTRY == "PORTUGAL",2]
+EQ_GDP[EQ_GDP$COUNTRY == "SERBIA AND MONTENEGRO",5] =  
+     out_gdp[out_gdp$COUNTRY == "SERBIA",2]
+EQ_GDP[EQ_GDP$COUNTRY == "YEMEN",5] =  
+     out_gdp[out_gdp$COUNTRY == "YEMEN, REP.",2]
+EQ_GDP[EQ_GDP$COUNTRY == "TAIWAN",5] =  12220.99
+EQ_GDP[EQ_GDP$COUNTRY == "IRAN",5] =  2460.52
+EQ_GDP <- filter(EQ_GDP,!is.na(Ave_gdp))
+
+query <- "
+     DROP TABLE IF EXISTS EQ_GDP
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+dbWriteTable(conn = dcon, name = "EQ_GDP", EQ_GDP,
+             append = TRUE, row.names = FALSE)
+
+
+```
+
+```{r Fig4,fig.width = 7.2, fig.height = 5.1, echo=F}
+require(grid)
+
+#EQ_GDP <- filter(EQ_GDP,Ave_dam>=1000)
+
+p2 = ggplot(EQ_GDP,aes(x=Ave_gdp, y=Ave_death, label=COUNTRY, colour = Ave_mag)) + 
+  theme_bw()+
+     geom_point(aes(color = Ave_mag), size=2.5) + 
+     geom_text_repel(aes(label=COUNTRY),size=2, colour = "black",segment.alpha = 0.6) +
+     scale_y_log10(labels = scales::comma) + 
+  scale_x_continuous(labels = scales::comma)+
+  scale_colour_gradient(low = "gold", high = "blue") +
+     ggtitle("Average Death Toll v.s GDP / Capita") +
+     xlab("Average GDP per Capita") +
+     ylab(expression(paste("Average Death Toll"," ", "(scale of log"[10],")"))) +
+labs(colour=expression(atop("Average", paste("Magnitude"))))
+
+g2 = ggplot(EQ_GDP,aes(x=Ave_gdp, y=Ave_death, label=COUNTRY, colour = Ave_mag)) + 
+     geom_point(aes(color = Ave_mag), size=1) + 
+     scale_y_log10(labels = scales::comma) + 
+  scale_colour_gradient(low = "gold", high = "blue") +
+     scale_x_continuous(limits = c(0,13000),labels = scales::comma) +
+     theme(legend.position="none",axis.title.x=element_blank(),
+      axis.title.y=element_blank()) 
+
+vp1 <- viewport(width = 0.32, 
+               height = 0.32, 
+               x = 0.68, 
+               y = 0.75)
+print(p2)
+print(g2, vp = vp1)
+#grid.lines(x = c(0.25, 0.75), y = 0.5, arrow = arrow(), vp = vp1)
+
+spearman02 <- cor(EQ_GDP$Ave_death,EQ_GDP$Ave_gdp,method ="spearman")
+spearman_test02 <- cor.test(EQ_GDP$Ave_death,EQ_GDP$Ave_gdp,method ="spearman")
+```
+\begin{figure}[htbp]
+\centering
+\caption{Average death toll plot against average GDP per capita (from 1967 to 2016). Color represents the average magnitude of the earthquake. Names of countries as labeled. Inserted figure is identical to the original figure but with the x-axis truncated at 13,000. In both figures, the death toll tends to decrease when the average GDP per capita increase. The Spearman's rank correlation coefficient is -0.5493 and the p-value is 0.000925. \label{Fig4}}
+\end{figure}
+
+
+To further consider a country's degree of development, we did two things. First, we grouped the same dataset used in figure 4 into 11 "bins" with equal intervals for average GDP per capita from 0 to 38500 (in constant 2000 US dollar). Then we took average of death toll over all the countries in each bin. Finally, we plotted the average death toll against the GDP per capita for each bin interval (figure 5). The inserted figure in figure 5 demonstrated the method we used to aggregate the data by bins to obtained figure 5. There is a general decreasing trend in average death when GDP per capita increase. For the lowest GDP countries, in average, they suffered 34,182 deaths which is much more than countries with higher GDP per capita. These result further confirmed our hypothesis. Notice that we didn't include standard deviation for the plots with aggregate data due to the fact that for some countries there is only one data point. 
+
+Second, we separated 34 countries shown in figure 4 into developed country or less-developed country based on 2016 GDP per capita and then calculated the average death for each group (table 2). From reference 8 we learned that there is no clear threshold for defining the "developed country", however, one unofficial threshold for a country with a developed economy is $12,000 GDP per capita. We adapted this standard when making table 2. From the result we found that the average deaths for developed countries is only 847 which is much lower than the less-developed countries with an average deaths 23,793. All our results in this section suggest that more developed countries tend to have less deaths. Notice here that all our results only suggest that there is a negative correlation between death toll and GDP per capita, but not a negative linear correlation. Again, that is the reason we used Spearman's rank correlation to analyze the data. 
+   
+```{r Fig5,fig.width = 7.2, fig.height = 6.6, echo=F}
+labels <- c("0-3500", "3500-7000", "7000-10500", "10500-14000",
+            "14000-17500", "17500-21000","21000-24500", "24500-28000",
+            "28000-31500","31500-35000","35000-38500")
+EQ_GDP$bins <- cut(EQ_GDP$Ave_gdp, breaks=seq(0,40000,3500),labels = labels)
+#EQ_GDP$bins <- cut(EQ_GDP$Ave_gdp, breaks=seq(0,40000,3500))
+data2 <- EQ_GDP %>% 
+    group_by(bins) %>% 
+    summarise(avgD_PD=mean((Ave_death)))
+    #summarise(avgD_PD=log(mean((Ave_death))), sd=log(sd(Ave_death)))
+aa <- data2 %>% merge(EQ_GDP, by="bins", all.y=TRUE)
+data3 <- data2 %>% 
+    merge(data.frame(bins=levels(EQ_GDP$bins)), by="bins", all=TRUE) %>%
+    replace(is.na(.), 0)
+
+data1 <- EQ_GDP %>% 
+    group_by(bins) 
+bb <- data1 %>% merge(EQ_GDP, by="bins", all.y=TRUE)
+data4 <- EQ_GDP %>% 
+    merge(data.frame(bins=levels(EQ_GDP$bins)), by="bins", all=TRUE) %>%
+    replace(is.na(.), 0)
+ttt <- full_join(data3,data4,by="bins")
+ttt <- filter(ttt, Ave_death != 0)
+g3 = ggplot(ttt, aes(x=bins, y=Ave_death, 
+                     label=COUNTRY, colour = Ave_mag)) +
+     geom_point(size=2.5) + 
+     scale_colour_gradient(low = "gold", high = "blue") +
+    geom_bar(aes(x=bins, y=avgD_PD),stat="unique",
+             fill="lavenderblush4",color = "gray96", 
+             position = 'identity') +
+     geom_point(size=2.5)+
+     geom_text_repel(aes(label=COUNTRY),size=1.6, fontface="bold", colour = "black",segment.alpha = 0.6)+
+     scale_y_log10(labels = scales::comma) +
+     xlab("Interval for average GDP per capita") +
+     ylab(expression(paste("Average Death Toll"," ", "(scale of log"[10],")"))) +
+     labs(colour = "Average Magnitude") +
+     scale_x_discrete(drop=FALSE,labels = scales::comma) +
+  scale_y_log10(labels = scales::comma)+
+  theme(axis.text.x = element_text (size=7,face="bold",
+                                    angle=45, hjust=1),
+        legend.position = "top")
+
+p3 = ggplot(data3, aes(x=bins, y=avgD_PD, group=bins)) + 
+    theme_bw()+
+    geom_bar(stat="identity", fill="hotpink4")  +
+    ggtitle("Average Death v.s GDP / Capita") +
+    xlab("Interval for Average GDP per Capita") +
+    ylab("Average Death Toll") +
+    theme(axis.text.x = element_text (face="bold",angle=45,hjust = 1))
+
+vp2 <- viewport(width = 0.65, 
+               height = 0.65, 
+               x = 0.62, 
+               y = 0.6)
+print(p3)
+print(g3, vp = vp2)
+```
+\begin{figure}[htbp]
+\centering
+\caption{(Main plot) Bar plot for average deaths against GDP per capita with the same dataset as for figure 4. Here, we separate the data into 11 "bins" with equal interval. Note that x-axis label represents the interval for each "bin" exclusive of the lower range and inclusive the upper range. Y value is average deaths for countries with GDP per capita inside each "bin". (Inserted Figure) the points are identical with the points in figure 4 but centered at the middle of the intervals where the data points belong to. For each bin, the gray bar is the average value (in log scale) for all the data points in that bin.  \label{Fig5}}
+\end{figure}
+
+
+```{r, echo=F}
+EQ_GDP2016 <- group_by(EQ_GDP2016_2, COUNTRY) %>%
+summarise(Ave_death = mean(DEATHS, na.rm=TRUE), Ave_mag = mean(MAG, na.rm=TRUE), Ave_dam = mean(dam, na.rm=TRUE), gdp2016 = mean(gdp2016, na.rm=TRUE))
+
+query <- "
+     DROP TABLE IF EXISTS EQ_GDP2016
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+dbWriteTable(conn = dcon, name = "EQ_GDP2016", EQ_GDP2016,
+             append = TRUE, row.names = FALSE)
+```
+
+```{r, echo=F}
+res <- dbSendQuery(conn = dcon, "
+SELECT *,
+       CASE WHEN gdp2016 > 12000
+       THEN 'Yes'
+       ELSE 'No'
+       END AS DevelopedCountry
+FROM EQ_GDP2016
+")
+out9 <- dbFetch(res, -1)
+dbClearResult(res)
+
+query <- "
+     DROP TABLE IF EXISTS EQ_GDP2016_02
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+dbWriteTable(conn = dcon, name = "EQ_GDP2016_02", out9,
+             append = TRUE, row.names = FALSE)
+
+query <- "
+     DROP TABLE EQ_GDP2016
+"
+res <- dbSendQuery(dcon, query)
+dbClearResult(res)
+
+res <- dbSendQuery(conn = dcon, "
+SELECT DevelopedCountry, round(avg(Ave_death)) as AverageDeath, count(*) as Numb_Cont
+FROM EQ_GDP2016_02
+GROUP BY DevelopedCountry
+")
+out10 <- dbFetch(res, -1)
+dbClearResult(res)
+
+out11 <- select(out10, DevelopedCountry,AverageDeath,Numb_Cont) %>%
+rename("Developed Country" = DevelopedCountry, "Average Deaths" = AverageDeath, "Number of Countries" = Numb_Cont)
+kable(out11, caption = "Average deaths caused by earthquake of developed countries and less-developed countries. 'Number of Countries' represents the number of countries in figure 4 considered as developed/less-developed countries.")
+```
+
+
+## (5) Damage (millions dollars) v.s GDP per capita 
+
+```{r Fig6,fig.width = 7.2, fig.height = 4.8, echo=F}
+res <- dbSendQuery(conn = dcon, "
+SELECT *
+FROM EQ_GDP
+WHERE Ave_dam IS NOT NULL
+ORDER BY Ave_dam DESC;
+")
+out4 <- dbFetch(res, -1)
+dbClearResult(res)
+
+require(grid)
+
+g = ggplot(out4,aes(x=Ave_gdp, y=Ave_dam, label=COUNTRY, colour = Ave_mag)) + 
+     geom_point(aes(color = Ave_mag), size=1) + 
+     scale_y_log10(labels = scales::comma) + 
+  scale_colour_gradient(low="gold", high="blue") +
+     scale_x_continuous(limits = c(0,13000),labels = scales::comma) +
+     theme(legend.position="none",axis.title.x=element_blank(),
+      axis.title.y=element_blank())
+
+p = ggplot(out4,aes(x=Ave_gdp, y=Ave_dam, label=COUNTRY, colour = Ave_mag)) + 
+  theme_bw()+
+     geom_point(aes(color = Ave_mag), size=2.5) + 
+     geom_text_repel(aes(label=COUNTRY),size=2, colour = "black") +
+     scale_y_log10(labels = scales::comma) + 
+  scale_x_continuous(labels = scales::comma)+
+  scale_colour_gradient(low="gold", high="blue") +
+     ggtitle("Average Damage (million dollars) v.s GDP / Capita") +
+     xlab("Average GDP per Capita") +
+     ylab("Average Damage (Million Dollars)") +
+labs(colour=expression(atop("Average", paste("Magnitude"))))
+vp1 <- viewport(width = 0.3, 
+               height = 0.3, 
+               x = 0.67, 
+               y = 0.3)
+print(p)
+print(g, vp = vp1)
+```
+\begin{figure}[htbp]
+\centering
+\caption{Average damage in million dollars plot against GDP per capita. Color represents the magnitude of earthquakes. Inserted figure is identical to the original figure but with the x-axis truncated at 13,000. \label{Fig6}}
+\end{figure}
+
+In this section, we plotted the average damage in million dollars for each country against average GDP per capita from 1967 to 2016 (figure 6). It is hard to see a clear trend at first but with more careful observation, we notice that countries with relatively higher GDP per capita (i.e. Japan, New Zealand, USA, Italy) experienced greater damage in terms of dollar values but smaller death toll (from figure 4). What interesting here is that the high damage in millions of dollars suggested that these countries indeed heavily hit by earthquakes, but the death toll is relatively low comparing with low GDP per capita countries. With the results from section 4 and 5, we then asked a question: what did these high GDP per capita countries do so that they can suffer from less deaths when earthquakes strike?
+  
+## (6) Scale death toll by nearby population 
+
+Before we moved further into other analysis, in this section, we incorporated the population factor so that we could have a fairer comparison between different countries. We first divided the death toll of each event (data in figure 3) by the population density of that country. Then, the normalized death toll (death toll/population density) was plotted against GDP per capita in 2016 (figure 7). We got the Spearman's rho to be -0.4585 and the p-value 1.81e-06. Comparing figure 7 with figure 3, surprisingly we found that incorporating the population factor makes the inverse correlation trend worse (decreased Spearman's rho). From the result, we think that it is necessary to consider the population density effect in a better way by calculating the population near the epicenter of the earthquake instead of the population density for whole country. 
+ 
+From previous result, we believe that if the earthquake epicenter is closer to city with high population, higher casualties will occur. To investigate this factor, we obtained the data from USGS website where We found detail information including the distance to nearby cities and population for those cities of each earthquake event we selected.
+
+```{r, fig.width = 6, fig.height = 4.8,echo=F}
+
+PD2 <- PD[,c(1,36)]
+#PD2$mean <- rowMeans(PD[,36],na.rm=TRUE)
+PD2 <- rename(PD2, "mean" = `1991`)
+PD_ave <- select(PD2, `Country Name`, mean)
+PD_ave <- PD_ave[-1,]
+PD_ave <- rename(PD_ave, "COUNTRY" = `Country Name`)
+PD_ave <- mutate(PD_ave, COUNTRY = toupper(COUNTRY))
+
+EQ_GDP2016_2 <- filter(EQ_GDP2016_2,!is.na(gdp2016))
+EQ_PD_in <- left_join(EQ_GDP2016_2,PD_ave , by = "COUNTRY")
+EQ_PD_in[EQ_PD_in$COUNTRY == "USA",8] =  PD_ave[PD_ave$COUNTRY == "UNITED STATES",2]
+EQ_PD_in[EQ_PD_in$COUNTRY == "RUSSIA",8] =  
+     PD_ave[PD_ave$COUNTRY == "RUSSIAN FEDERATION",2]
+EQ_PD_in[EQ_PD_in$COUNTRY == "AZORES (PORTUGAL)",8] =  
+     PD_ave[PD_ave$COUNTRY == "PORTUGAL",2]
+EQ_PD_in[EQ_PD_in$COUNTRY == "SERBIA AND MONTENEGRO",8] =  
+     PD_ave[PD_ave$COUNTRY == "SERBIA",2]
+EQ_PD_in[EQ_PD_in$COUNTRY == "YEMEN",8] =  
+     PD_ave[PD_ave$COUNTRY == "YEMEN, REP.",2]
+EQ_PD_in[EQ_PD_in$COUNTRY == "TAIWAN",8] =  600
+EQ_PD_in[EQ_PD_in$COUNTRY == "IRAN",8] =  45.2
+EQ_PD_in <- filter(EQ_PD_in,!is.na(mean))
+EQ_PD_in[EQ_PD_in$COUNTRY == "SERBIA AND MONTENEGRO",1] = "SERBIA"
+
+```
+
+```{r Fig7,fig.width = 7, fig.height = 5.8, echo=F}
+
+require(grid)
+EQ_PD_ave <- mutate(EQ_PD_in, NorDeath01 = DEATHS/mean)
+
+ggplot(EQ_PD_ave,aes(x=gdp2016, y=NorDeath01, label=COUNTRY, colour = MAG)) + 
+  theme_bw()+
+     geom_point(aes(color = MAG), size=2.5) + 
+     geom_text_repel(aes(label=COUNTRY),size=1.6, fontface="bold", colour = "black",segment.alpha = 0.6,force=2.5,box.padding = 0.2) +
+     scale_y_log10(labels = scales::comma) + 
+  scale_x_continuous(labels = scales::comma)+
+  scale_colour_gradient(low="gold", high = "blue") +
+     ggtitle("Death / Population Density  v.s GDP / Capita") +
+     xlab("GDP per Capita (2016)") +
+     ylab(expression(paste("Death Toll / Population Density"," ", "(scale of log"[10],")"))) +
+     labs(colour = "Magnitude") 
+
+
+# g2 = ggplot(EQ_PD_ave,aes(x=gdp2016, y=NorDeath01, label=COUNTRY, colour = MAG)) + 
+#      geom_point(aes(color = MAG), size=2) + 
+#      scale_y_log10() + scale_colour_gradientn(colours = terrain.colors(10)) +
+#      scale_x_continuous(limits = c(0,15000)) +
+#      theme(legend.position="none",axis.title.x=element_blank(),
+#       axis.title.y=element_blank()) 
+# 
+# vp1 <- viewport(width = 0.38, 
+#                height = 0.38, 
+#                x = 0.55, 
+#                y = 0.73)
+# print(p2)
+# print(g2, vp = vp1)
+spearman03 <- cor(EQ_PD_ave$NorDeath01,EQ_PD_ave$gdp2016,method ="spearman")
+spearman_test03 <- cor.test(EQ_PD_ave$NorDeath01,EQ_PD_ave$gdp2016,method ="spearman")
+```
+\begin{figure}[htbp]
+\centering
+\caption{Death/population density for each country plot against 2016 GDP per capita. Color represents the magnitude of earthquakes. Names of countries as labeled. The Spearman's rank correlation coefficient is -0.4585 and the p-value is 1.81e-06. \label{Fig7}}
+\end{figure}
+ 
+
+To incorporate population considerations, we normalized the death toll by a "population factor" ($\beta$). $$\beta = \sum_{i=1}^{n} p_i/r_i$$  Here, n is number of cities within 50 km radius from  the epicenter, $p_i$ equals to the population inside the city, $r_i$ equals the distance from the earthquake epicenter to the city. Death toll was normalized by dividing it by $\beta$. Death/population factor ($\beta$) was plotted against 2016 GDP per capita (figure 8). The normalized death toll in general decreases when GDP per capita increases. After calculation, we noticed that after normalization, the Spearman's rho increases from -0.5100 to -0.57879 while p-value decreases from 7.0e-08 to 1.23e-09. Comparing with normalized to average population density for each country (figure 7), normalized to "population factor" provide a much better result (figure 8). We believed that these results suggest that normalizing the death toll by "population factor" can be helpful for data interpretation.
+  
+  
+```{r, fig.width = 10, fig.height = 6,echo=F}
+EQ_PD_in_2 <- filter(EQ_PD_in_2, !is.na(NEAR_P))
+EQ_PD3 <- mutate(EQ_PD_in_2, f1=p1/x1,f2=p2/x2,f3=p3/x3,f4=p4/x4,f5=p5/x5,f6=p6/x6,f7=p7/x7)
+EQ_PD3 <- mutate(EQ_PD3,PDN1=rowSums(EQ_PD3[25:31],na.rm=TRUE))
+EQ_PD3 <- mutate(EQ_PD3, NorDeath = DEATHS/PDN1)
+```
+
+```{r Fig8,fig.width = 7.2, fig.height = 6.4, echo=F}
+
+p2 = ggplot(EQ_PD3,aes(x=gdp2016, y=NorDeath, label=COUNTRY, colour = MAG)) +
+  theme_bw()+
+     geom_point(aes(color = MAG), size=2.5) + 
+     geom_text_repel(aes(label=COUNTRY),size=1.6, fontface="bold", colour = "black",segment.alpha = 0.6,force=2.5,box.padding = 0.21) +
+     scale_y_log10(labels = scales::comma) + 
+  scale_x_continuous(labels = scales::comma)+
+  scale_colour_gradient(low="gold",high="blue") +
+     ggtitle("Death / Population Factor  v.s GDP / Capita") +
+     xlab("GDP per Capita (2016)") +
+     ylab(expression(paste("Death / Population Factor"," ", "(scale of log"[10],")"))) +
+     labs(colour = "Magnitude") 
+
+
+ g2 = ggplot(EQ_PD3,aes(x=gdp2016, y=NorDeath, 
+                        label=COUNTRY, colour = MAG)) + 
+      geom_point(aes(color = MAG), size=0.5) + 
+      scale_y_log10(labels = scales::comma) + 
+   scale_colour_gradient(low = "gold", high = "blue") +
+      scale_x_continuous(limits = c(0,16000),
+                         labels = scales::comma) +
+      theme(legend.position="none",axis.title.x=element_blank(),
+       axis.title.y=element_blank(),
+       axis.text = element_text(size = 6)) 
+ 
+vp1 <- viewport(x = 0.5, y = 0.4, width = 0.9, height = 0.8)
+vp2 <- viewport(x = 0.8, y = 0.73, width = 0.25, height = 0.25)
+
+print(p2, vp = vp1)
+print(g2, vp = vp2)
+
+# 
+# vp1 <- viewport(width = 0.38, 
+#                height = 0.38, 
+#                x = 0.55, 
+#                y = 0.73)
+# print(p2)
+# print(g2, vp = vp1)
+spearman04 <- cor(EQ_PD3$NorDeath,EQ_PD3$gdp2016,method ="spearman")
+spearman_test04 <- cor.test(EQ_PD3$NorDeath,EQ_PD3$gdp2016,method ="spearman")
+```
+\begin{figure}[htbp]
+\centering
+\caption{Death/population factor ($\beta$) plot against 2016 GDP per capita. The Spearman's rank correlation coefficient is -0.57879 and the p-value is 1.23e-09. (Top right) Identical to the original figure but with the x-axis truncated at 16,000. In both figures, the death/population factor ($\beta$) tends to decrease as GDP per capita increases. \label{Fig8}}
+\end{figure}
+
+  
+## (7) Seismic Building Code 
+
+\begin{table}[ht]
+\centering
+\caption{Detail information for 20 major earthquakes in the past decades. "Year code published": year which the seismic code first published. "Seismic code applied": whether the code really has been enforced by government$^{11-15}$. All other variables are defined previously.}
+\begin{tabular}{rrlrrlrll}
+  \hline
+  
+\textbf{Year} & \textbf{Country} & \textbf{Magni} &  \textbf{Deaths} &  \textbf{Damage} & \textbf{2016 GDP/} & \textbf{Year Code} & \textbf{Seismic Code} \\ 
+               &                  & \textbf{-tude} &                  &  \textbf{(\$M)} &  \textbf{capita} & \textbf{Published} & \textbf{Applied} \\
+\hline
+
+1976 & China & 7.50 & 242,769 & 5,600 &  6,895 & 1959 & \textcolor{red}{No$^{11}$} \\ 
+1976 & Guatemala & 7.50 & 23,000 & 2,147 &  3,100 & n/a & \textcolor{red}{Zero$^{12}$} \\ 
+1990 & Iran & 7.40 & 50,000 & 8,000 & 2,461 & 1989 & \textcolor{red}{No$^{13}$} \\ 
+2001 & India & 7.70 & 20,005 & 2,623 &  1,862 & 1962 & \textcolor{red}{No$^{11}$} \\ 
+2005 & Pakistan & 7.60 & 76,213 & 6,680 &  1,182 & 1986 & \textcolor{red}{No$^{11}$} \\ 
+2008 & China & 7.90 & 87,653 & 86,000 &  6,895 & 1959 & \textcolor{red}{No$^{11}$} \\ 
+2010 & Haiti & 7.00 & 316,000 & 8,000 &   729 & n/a & \textcolor{red}{Zero$^{11}$} \\ 
+2015 & Nepal & 7.80 & 8,200 & 10,000 &   682 & 1994 & \textcolor{red}{No$^{11,13}$} \\ 
+\hline
+1976 & Italy & 6.50 & 978 & 3,600 & 34,284 & 1909 & \textcolor{blue}{Yes$^{14}$} \\ 
+1980 & Italy & 6.90 & 4,689 & 20,000 & 34,284 & 1909 & \textcolor{blue}{Yes$^{14}$} \\ 
+1985 & Chile & 8.00 & 180 & 1,500 & 15,020 & 1972 & \textcolor{blue}{Yes$^{11,13}$} \\ 
+1994 & USA & 6.70 &  60 & 40,000 & 52,195 & 1956 & \textcolor{blue}{Yes$^{11,13}$} \\ 
+1995 & Japan & 6.90 & 5,502 & 100,000 & 47,608 & 1950 & \textcolor{blue}{Yes$^{11,13}$} \\ 
+1999 & Taiwan & 7.70 & 2,297 & 14,000 & 22,540 & 1974 & \textcolor{blue}{Yes$^{15}$} \\ 
+2007 & Peru & 8.00 & 514 & n/a &  6,089 & 1970 & \textcolor{blue}{Yes$^{11}$} \\ 
+2009 & Italy & 6.30 & 309 & 2,500 & 34,284 & 1909 & \textcolor{blue}{Yes$^{14}$} \\ 
+2010 & Chile & 8.80 & 402 & 30,000 & 15,020 & 1972 & \textcolor{blue}{Yes$^{11,13}$} \\ 
+2011 & Japan & 9.10 & 1,476 & 100,000 & 47,608 & 1950 & \textcolor{blue}{Yes$^{11,13}$} \\ 
+2011 & New Zealand & 6.10 & 181 & 15,000 & 36,842 & 1965 & \textcolor{blue}{Yes$^{11}$} \\ 
+2015 & Chile & 8.30 & 7 & 600 & 15,020 & 1972 & \textcolor{blue}{Yes$^{11,13}$} \\ 
+  \hline
+\end{tabular}
+\end{table}
+
+In section (4) and (5) we found that: (1) When GDP per capita increases, the death toll tends to decrease; (2) Even though high GDP per capita countries suffered from high damage in million dollars, the death toll is relatively low comparing to low GDP per capita countries. These observations inspired us further investigating possible reasons which cause these results. In this section, we wanted to study the correlation between the death toll and the seismic code which is one kind of building codes designed to protect life in buildings in case of earthquakes. Our hypothesis is that in poor countries, the buildings are built with cheap and low-quality materials and may not have seismic code enforcement. When earthquakes strike, the collapsed buildings with heavy roofs can cause a lot of deaths$^{13}$. Also, since the buildings are cheaply made, the damage in millions of dollars may not be high. The table below lists 20 major earthquakes in the past decades. First, notice that having a seismic code does not mean that the code is implemented since the seismic codes are often only implemented in urban areas and for new buildings (Pakistan and China)$^{11}$. Also, the seismic code can also be poorly enforced due to corruption and weak governance$^{11-13}$. Hence, in table 3 we can see several countries with seismic code published but not applied. The first eight rows are those did not apply seismic code strictly. The rest are more developed countries which applied the seismic code strictly. We can tell that the death toll is larger in the upper part of the table for the countries in general with lower GDPs. We could not see an obvious trend in the damage, but as we analyzed before, developed countries tend to have larger damage in dollar. We only selected 14 countries in table 3 which we can find solid reference$^{11-15}$ regarding whether the seismic code has been applied. Though we see a correlation between low death toll and applied seismic code, the result may not be statistically significant, so we then plotted the information in table 3 into figure 9 (A). The countries with seismic code applied are in blue, otherwise in red. Those without seismic code enforcement in general has low GDP per capita and high death toll, those with strict seismic code has high GDP per capita and low death toll. Notice that in figure 9 (A), even though we considered Peru as the country with seismic code applied in table 3, Peru has a very high death toll. The reason is that for Peru the seismic code was published in 1970 right after a devastating earthquake happened in that year. In this magnitude 7.9 earthquake, 66,794 people was killed and we can see the data points shown in figure 9 (A). After the seismic code been published and enforced, the death toll (=514) is relatively low in the earthquake happened in 2007 with magnitude 8.0 (table 3).  To further test this correlation, we selected 3 countries with strict and well developed seismic code together with other 3 countries with seismic code either poorly or not enforced. We plotted the death toll against year since 1900 (figure 9 (B)&(C)). For the countries with seismic code applied, we drew an arrow to point out the year which the seismic code has been enforced (Chile$^{13}$, USA$^{11}$) or major seismic code revisions were made (Japan$^{16}$). From reference 11-15 we learned that it is hard to have a clear point which separate the time into with and without seismic code enforcement. Most countries with strict seismic code updated the code regularly$^{11}$. We noticed that for the countries without seismic code applied (China, Iran and Nepal), the death toll doesn't show an obvious trend against year and all data points just scattered around. For the countries with seismic code enforcement (Chile, Japan and USA), we can see that the death toll in general decreased after the seismic code been enforced. Similar as discussed before, this result itself may not be statistically significant, but it is consistent with all other results. Therefore, we concluded that more developed countries tend to have more enforced seismic building code which is an effective way to decrease death toll in the earthquakes.
+  
+  
+```{r, echo=F,fig.width = 10, fig.height = 11.8,echo=FALSE}
+##Fig.A
+require(ggrepel)
+require(grid)
+library(jpeg)
+EQ_GDP_SC <- filter(EQ_GDP, COUNTRY == "CHINA" | COUNTRY == "GUATEMALA"| COUNTRY == "IRAN"| COUNTRY == "INDIA"| COUNTRY == "PAKISTAN"| COUNTRY == "HAITI"| COUNTRY == "NEPAL"| COUNTRY == "ITALY"| COUNTRY == "CHILE"| COUNTRY == "USA"| COUNTRY == "JAPAN"| COUNTRY == "TAIWAN"| COUNTRY == "PERU"| COUNTRY == "NEW ZEALAND")
+
+EQ_GDP_SC <- EQ_GDP_SC %>% mutate(code_app = ifelse(COUNTRY == "CHINA" | COUNTRY == "GUATEMALA"| COUNTRY == "IRAN"| COUNTRY == "INDIA"| COUNTRY == "PAKISTAN"| COUNTRY == "HAITI"| COUNTRY == "NEPAL", "no", "yes"))
+
+img <- readJPEG("building.jpg") #import jpg
+g <- rasterGrob(img, interpolate=TRUE) #Grid
+
+A <- qplot(Ave_gdp, log10(Ave_death), size = I(3),label=COUNTRY, geom=c("point"), hjust=-0.2, vjust=0, colour = factor(code_app), xlab = "Average GDP per capita", ylab = expression(paste("Average Death Toll"," ", "(scale of log"[10],")")), data = EQ_GDP_SC) + labs(colour = 'Seismic code applied', title="A")+
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = -0.03),
+        legend.text=element_text(size=12),
+        legend.box.margin = margin(2, 2, 2, 2),
+        legend.box.background = element_rect()) + 
+  geom_text_repel(aes(label=COUNTRY),size=3)+
+  scale_colour_manual(values=c("firebrick1", "royalblue4"))
+
+C1900 <- filter(EQdata0, YEAR >= 1900, EQ_PRIMARY >=6.5)
+
+##Fig.B
+C1900_Nepal <- filter(C1900, COUNTRY == "NEPAL", DEATHS >=10)
+C1900_China <- filter(C1900, COUNTRY == "CHINA", DEATHS >=10)
+C1900_Iran <- filter(C1900, COUNTRY == "IRAN", DEATHS >=10)
+
+merged_B <- Reduce(function(x, y) merge(x, y, all=TRUE), 
+                 list(C1900_Nepal, C1900_China, C1900_Iran))
+##Factor/Levels
+merged_B$Country <- factor(merged_B$COUNTRY,
+                         levels=c('CHINA','IRAN','NEPAL'))
+
+##plot
+B <- qplot(YEAR, log10(DEATHS),data = merged_B,
+           colour=EQ_PRIMARY,
+           group=COUNTRY)+ geom_point(size=2)+
+  labs(colour = "Magnitude", title="B",
+       x="Year (1900-2016)", 
+       y=expression(paste("Death Toll"," ", "(scale of log"[10],")")))+
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.box.margin = margin(2, 2, 2, 2),
+        legend.box.background = element_rect(),
+        plot.title = element_text(hjust = -0.03),
+        plot.caption = element_text(size = 12,face = "bold"),
+        legend.title = element_text(size=10),
+        legend.position = "top",
+        strip.text.x = element_text(size = 11)) +
+  scale_color_gradient(low = "red", high = "pink",
+                       breaks = c(6.5,7.0,7.5,8.0,8.5))+
+  ylim(0,5.5)+
+  facet_wrap(~Country, nrow = 3)+
+  geom_rug(sides="b")
+
+##Fig.C
+C1900_Chile <- filter(C1900, COUNTRY == "CHILE", DEATHS >=10)
+C1900_Japan <- filter(C1900, COUNTRY == "JAPAN", DEATHS >=10)
+C1900_USA <- filter(C1900, COUNTRY == "USA", DEATHS >=10)
+
+merged_C <- Reduce(function(x, y) merge(x, y, all=TRUE), 
+                   list(C1900_Chile, C1900_Japan, C1900_USA))
+##Factor/Levels
+merged_C$Country <- factor(merged_C$COUNTRY,
+                         levels=c('CHILE','JAPAN','USA'))
+##annotation
+g1 <- subset(merged_C, YEAR == "1960" & COUNTRY == "CHILE")
+g2 <- subset(merged_C, YEAR == "1995" & COUNTRY == "JAPAN")
+g3 <- subset(merged_C, YEAR == "1956" & COUNTRY == "USA")
+##plot
+C <- qplot(YEAR, log10(DEATHS),data = merged_C,
+           colour=EQ_PRIMARY,
+           group=COUNTRY)+ geom_point(size=2)+
+  labs(colour = "Magnitude", title="C",
+       x="Year (1900-2016)", 
+       y=expression(paste("Death Toll"," ", "(scale of log"[10],")")))+
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.box.margin = margin(2, 2, 2, 2),
+        legend.box.background = element_rect(),
+        plot.title = element_text(hjust = -0.03),
+        plot.caption = element_text(size = 12,face = "bold"),
+        legend.title = element_text(size=10),
+        legend.position = "top",
+        strip.text.x = element_text(size = 11)) +
+  ylim(0,5.5)+
+  facet_wrap(~Country, nrow = 3)+
+  geom_rug(sides="b") +
+  geom_vline(data=data.frame(xint=1962,Country="CHILE"),
+             aes(xintercept=xint),linetype=2,lwd=0.5, col="grey60") +
+  geom_vline(data=data.frame(xint=1997,Country="JAPAN"),
+             aes(xintercept=xint),linetype=2,lwd=0.5,col="grey60") +
+  geom_vline(data=data.frame(xint=1956,Country="USA"),
+             aes(xintercept=xint),linetype=2,lwd=0.5,col="grey60") +
+  scale_color_continuous(breaks = c(6.5,7.5,8.5,9.5))
+##
+library(jpeg)
+img <- readJPEG("building.jpg") 
+x1 <- img[,,1] # the "r" of rgb
+x2 <- img[,,2] # the "g"
+x3 <- img[,,3] # the "b"
+
+widthno <- ncol(x1) # specifies number of grid cells in x direction
+heightno <- nrow(x1) # number of grid cells in y direction
+xygrid <- expand.grid(seq(1,2*widthno,2)/(2*widthno),
+                      seq(1,2*heightno,2)/(2*heightno))
+pushViewport(viewport())
+vp <- viewport(h=min(1, heightno/widthno),
+               w=min(1,widthno/heightno), 
+               gp=gpar(alpha=1))
+pushViewport(vp)
+upViewport()
+upViewport()
+
+##layout
+vp1 <- viewport(x = 0.5, y = 0.8, width = 0.8, height = 0.4)
+vp2 <- viewport(x = 0.25, y = 0.3, width = 0.5, height = 0.6)
+vp3 <- viewport(x = 0.75, y = 0.3, width = 0.5, height = 0.6)
+vp4 <- viewport(x = 0.5, y = 0.845, width = 0.2, height = 0.12, 
+                just = c("left", "bottom"))
+print(A, vp = vp1)
+print(B, vp = vp2)
+print(C, vp = vp3)
+grid.rect(height=1/heightno, width=1/widthno, 
+          x=rev(xygrid$Var1),
+          y=xygrid$Var2, 
+          gp=gpar(fill=rgb(rev(as.vector(t(x1))),
+                           rev(as.vector(t(x2))),
+                           rev(as.vector(t(x3))),1),
+                  lty="blank"),
+          vp=vp4)
+##arrows in vp3
+grid.lines(x = c(0.57, 0.67), y = 0.79, 
+           arrow = arrow(), vp = vp3,
+           gp = gpar(col="grey60"))
+grid.lines(x = c(0.82, 0.92), y = 0.53, 
+           arrow = arrow(), vp = vp3,
+           gp = gpar(col="grey60"))
+grid.lines(x = c(0.53, 0.63), y = 0.27, 
+           arrow = arrow(), vp = vp3,
+           gp = gpar(col="grey60"))
+grid.text("seismic code applied", 
+          x=0.385, y=0.77, 
+          gp=gpar(col="blue", fontsize =11), vp=vp1)
+grid.text("seismic code not applied", x=0.37, y=0.72, 
+          gp=gpar(col="firebrick3", fontsize =11), vp=vp1)
+##vp1
+grid.lines(x = unit(c(0.48,0.55), "npc"),
+           y = unit(c(0.77,0.77), "npc"),
+           gp= gpar(col = "black"), vp =vp1)
+grid.lines(x = unit(c(0.48,0.6), "npc"),
+           y = unit(c(0.72,0.72), "npc"),
+           gp= gpar(col = "black"), vp =vp1)
+```
+
+Figure 9: (A) 14 countries with solid evidences $^{13-15}$ indicating whether the seismic code has been enforced or not (Yes: blue, No: red) was plotted in average death toll against average GDP per capita (from 1967 to 2016). Inserted figure shows (adapted from reference 17) houses with and without seismic reinforcement work done after being shaken violently in an earthquake. Death toll was plotted against year from 1900 to 2017 for three countries without seismic code enforcement (B) and with seismic code enforcement (C). Gray arrow in (C) indicates the year which the seismic code has been enforced.
+
+
+#IV. Conclusion  
+
+In this study, we analyzed the death toll caused by major earthquakes since 1967 against different factors. We started with some obvious factors and decided to extend our research to GDP per capita and seismic building code. To better interpret the results, we normalized the death toll by a population factor $\beta$. We concluded our study by figure 10. In this figure, we presented 6 different parameters used for this study (detail information refers to figure caption). By visualization we can clearly see that the countries with higher GDP per capita tend to have more well-enforced seismic building codes, hence, have less deaths. The pink arrow represents the vector sum of GDP per capita (yellow arrow) and damage (million dollars, green arrow). Hence, $tan\theta = damage/GDP$, where $\theta$ is the angle between the yellow arrow and pink arrow. We noticed that comparing with low GDP per capita countries, the countries with higher GDP per capita tend to have a smaller $\theta$, which means that they have less damage relatively to GDP per capita (even though the absolute value of the damage may not be less). All our results suggest that the countries with higher GDP per capita tend to have less death toll. Furthermore, the death toll can be reduced significantly by well-enforced seismic building code. Another possibility for countries with higher GDP per capita tend to have less death toll is that these countries are more prepared for earthquakes. For example, the government may spend more budget on disaster prevention and education. In Japan, earthquake drills are regularly held at public elementary schools. All these factors can influence the death toll in earthquakes and are worth for further study. In conclusion, we believe our results can shed light on possible methods to reduce the earthquake casualty.  
+
+
+```{r,fig.width = 10, fig.height = 6, echo=F}
+Ctr_posi <- rename(Ctr_posi0, "COUNTRY"=name)
+Ctr_posi <- Ctr_posi[-c(42,185,205),]
+Ctr_posi <- mutate(Ctr_posi, COUNTRY = toupper(COUNTRY))
+EQ_GDP_Po <- left_join(EQ_GDP,Ctr_posi, by = "COUNTRY") 
+EQ_GDP_Po[EQ_GDP_Po$COUNTRY == "USA",8] = Ctr_posi[Ctr_posi$COUNTRY == "UNITED STATES",2]
+EQ_GDP_Po[EQ_GDP_Po$COUNTRY == "USA",9] = Ctr_posi[Ctr_posi$COUNTRY == "UNITED STATES",3]
+EQ_GDP_Po[EQ_GDP_Po$COUNTRY == "AZORES (PORTUGAL)",8] = Ctr_posi[Ctr_posi$COUNTRY == "PORTUGAL",2]
+EQ_GDP_Po[EQ_GDP_Po$COUNTRY == "AZORES (PORTUGAL)",9] = Ctr_posi[Ctr_posi$COUNTRY == "PORTUGAL",3]
+EQ_GDP_Po[EQ_GDP_Po$COUNTRY == "SERBIA AND MONTENEGRO",8] = Ctr_posi[Ctr_posi$COUNTRY == "SERBIA",2]
+EQ_GDP_Po[EQ_GDP_Po$COUNTRY == "SERBIA AND MONTENEGRO",9] = Ctr_posi[Ctr_posi$COUNTRY == "SERBIA",3]
+
+EQ_GDP_Po2 <- filter(EQ_GDP_Po, COUNTRY == "CHINA" | COUNTRY == "GUATEMALA"| COUNTRY == "IRAN"| COUNTRY == "INDIA"| COUNTRY == "PAKISTAN"| COUNTRY == "HAITI"| COUNTRY == "NEPAL"| COUNTRY == "ITALY"| COUNTRY == "CHILE"| COUNTRY == "USA"| COUNTRY == "JAPAN"| COUNTRY == "TAIWAN"| COUNTRY == "PERU"| COUNTRY == "NEW ZEALAND")
+
+EQ_GDP_Po2 <- EQ_GDP_Po2 %>% mutate(code_app = ifelse(COUNTRY == "CHINA" | COUNTRY == "GUATEMALA"| COUNTRY == "IRAN"| COUNTRY == "INDIA"| COUNTRY == "PAKISTAN"| COUNTRY == "HAITI"| COUNTRY == "NEPAL", 0, 1))
+
+```
+
+
+```{r Fig10,fig.width = 11, fig.height = 7, echo=F}
+require(grid)
+#latitude(y) from -40 to 80 longitude(x) = -180 to 180
+vp <- viewport(y = unit(3, "lines"), width = 0.9, height = 0.8, just = "bottom", xscale = c(-180, 180), yscale = c(-70, 90))
+v2 <- viewport(y = unit(3, "lines"), width = 0.9, height = 0.8, just = "bottom", xscale = c(-180, 180),yscale = c(-70, 90))
+grid.newpage()
+pushViewport(vp)
+grid.rect(gp = gpar(col = "blue",fill="black"))
+ii=1
+jj=1
+EQ_GDP_Po2 <- arrange(EQ_GDP_Po2,Ave_mag)
+
+for (i in 1 : nrow(out0)){
+  x1 = unit(out0[i,4], "native")#(EQ_GDP_Po2[i,9]+180)/361
+  y1 = unit(out0[i,3], "native")#(EQ_GDP_Po2[i,8]+50)/139
+  grid.circle(x=x1, y=y1, r=0.004, default.units="npc", name=NULL,
+            gp = gpar(col = 'black',fill = "azure",alpha=0.8), draw=TRUE)
+}
+
+#'black'
+for (i in 1 : nrow(EQ_GDP_Po2)){
+  x1 = unit(EQ_GDP_Po2[i,9], "native")#(EQ_GDP_Po2[i,9]+180)/361
+  y1 = unit(EQ_GDP_Po2[i,8], "native")#(EQ_GDP_Po2[i,8]+50)/130
+  r1 = log2(EQ_GDP_Po2[i,2])/200
+  m1 = (EQ_GDP_Po2[i,3] - 5)*2.5
+  #c1 = EQ_GDP_Po2[i,1]
+  if (EQ_GDP_Po2[i,10] == 1){
+    Col = 'blue'
+    #grid.lines(x = x1, y = unit(c(89, (89-m1)), "native"),gp = gpar(col = 'blue', lwd=6))
+    if(ii == 7){
+      grid.rect(x = x1, y = unit((89-m1/2), "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "blue3",fill="blue3"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((89-m1)-4,"native"),gp=gpar(col="lightblue1",fontsize=8,alpha=0.7,fontface = "bold"))
+      ii=ii+1
+    }
+    if(ii == 6){
+      grid.rect(x = x1, y = unit((89-m1/2), "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "blue",fill="blue"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((89-m1)-2,"native"),gp=gpar(col="lightblue1",fontsize=8,alpha=0.7,fontface = "bold"))
+      ii=ii+1
+    }
+    if(ii == 5){
+      grid.rect(x = x1, y = unit((89-m1/2), "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "deepskyblue2",fill="deepskyblue2"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((89-m1)-2,"native"),gp=gpar(col="lightblue1",fontsize=8,alpha=0.7,fontface = "bold"))
+      ii=ii+1
+    }
+    if(ii == 4){
+      grid.rect(x = x1, y = unit((89-m1/2), "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "deepskyblue",fill="deepskyblue"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((89-m1)-2,"native"),gp=gpar(col="lightblue1",fontsize=8,alpha=0.7,fontface = "bold"))
+      ii=ii+1
+    }
+    if(ii == 3){
+      grid.rect(x = x1, y = unit((89-m1/2), "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "cadetblue3",fill="cadetblue3"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((89-m1)-2,"native"),gp=gpar(col="lightblue1",fontsize=8,alpha=0.7,fontface = "bold"))
+      ii=ii+1
+    }
+    if(ii == 2){
+      grid.rect(x = x1, y = unit((89-m1/2), "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "cadetblue2",fill="cadetblue2"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((89-m1)-2,"native"),gp=gpar(col="lightblue1",fontsize=8,alpha=0.7,fontface = "bold"))
+      ii=ii+1
+    }
+    if(ii == 1){
+      grid.rect(x = x1, y = unit((89-m1/2), "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "cadetblue1",fill="cadetblue1"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((89-m1)-2,"native"),gp=gpar(col="lightblue1",fontsize=8,alpha=0.7,fontface = "bold"))
+      ii=ii+1
+    }
+    
+  }else{
+    Col = 'red'
+   # grid.lines(x = x1, y = unit(c(-69, (-69+m1)), "native"),gp = gpar(col = 'red', lwd=6))
+    if(jj == 7){
+      grid.rect(x = x1, y = unit(-69+m1/2, "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "red3",fill="red3"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((-69+m1)+2,"native"),gp=gpar(col="lightpink",fontsize=8,alpha=0.7,fontface = "bold"))
+      jj=jj+1
+    }
+    if(jj == 6){
+      grid.rect(x = x1, y = unit(-69+m1/2, "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "red",fill="red"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((-69+m1)+2,"native"),gp=gpar(col="lightpink",fontsize=8,alpha=0.7,fontface = "bold"))
+      jj=jj+1
+    }
+    if(jj == 5){
+      grid.rect(x = x1, y = unit(-69+m1/2, "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "palevioletred3",fill="palevioletred3"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=unit(EQ_GDP_Po2[i,9]+1,"native"),y=unit((-69+m1)+4,"native"),gp=gpar(col="lightpink",fontsize=8,alpha=0.7,fontface = "bold"))
+      jj=jj+1
+    }
+    if(jj == 4){
+      grid.rect(x = x1, y = unit(-69+m1/2, "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "palevioletred2",fill="palevioletred2"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((-69+m1)+2,"native"),gp=gpar(col="lightpink",fontsize=8,alpha=0.7,fontface = "bold"))
+      jj=jj+1
+    }
+    if(jj == 3){
+      grid.rect(x = x1, y = unit(-69+m1/2, "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "palevioletred1",fill="palevioletred1"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((-69+m1)+2,"native"),gp=gpar(col="lightpink",fontsize=8,alpha=0.7,fontface = "bold"))
+      jj=jj+1
+    }
+    if(jj == 2){
+      grid.rect(x = x1, y = unit(-69+m1/2, "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "pink2",fill="pink2"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((-69+m1)+2,"native"),gp=gpar(col="lightpink",fontsize=8,alpha=0.7,fontface = "bold"))
+      jj=jj+1
+    }
+    if(jj == 1){
+      grid.rect(x = x1, y = unit(-69+m1/2, "native"),width = unit(4,"native"),height = unit(m1,"native"),gp = gpar(col = "pink",fill="pink"))
+      grid.text(as.character(round(EQ_GDP_Po2[i,3],2)),x=x1,y=unit((-69+m1)+2,"native"),gp=gpar(col="lightpink",fontsize=8,alpha=0.7,fontface = "bold"))
+      jj=jj+1
+    }
+  }
+  grid.circle(x=x1, y=y1, r=r1, default.units="npc", name=NULL,
+            gp = gpar(col = 'white',fill = Col,alpha=0.6), draw=TRUE)
+  
+}
+
+for (i in 1 : nrow(EQ_GDP_Po2)){
+  x1 = unit(EQ_GDP_Po2[i,9], "native") #(EQ_GDP_Po2[i,9]+180)/361
+  y1 = unit(EQ_GDP_Po2[i,8], "native") #(EQ_GDP_Po2[i,8]+50)/130
+  d1 = sqrt(EQ_GDP_Po2[i,4])*0.12
+  grid.lines(x = x1, y = unit(c(EQ_GDP_Po2[i,8], (EQ_GDP_Po2[i,8]+d1)), "native"), arrow = arrow(length=unit(4,"native")),gp = gpar(col = 'green', lwd=2))
+  g1 = sqrt(EQ_GDP_Po2[i,5])*0.25
+  grid.lines(x = unit(c(EQ_GDP_Po2[i,9], (EQ_GDP_Po2[i,9]-g1)), "native"), y = y1, arrow = arrow(length=unit(4,"native")),gp = gpar(col = 'yellow', lwd=2))
+  grid.lines(x = unit(c(EQ_GDP_Po2[i,9], (EQ_GDP_Po2[i,9]-g1)), "native"), y = unit(c(EQ_GDP_Po2[i,8], (EQ_GDP_Po2[i,8]+d1)), "native"), arrow = arrow(length=unit(4,"native")),gp = gpar(col = 'hotpink', lwd=2))
+}
+for (i in 1 : nrow(EQ_GDP_Po2)){
+  x1 = unit(EQ_GDP_Po2[i,9], "native") #(EQ_GDP_Po2[i,9]+180)/361
+  y1 = unit(EQ_GDP_Po2[i,8], "native") #(EQ_GDP_Po2[i,8]+50)/130
+  c1 = EQ_GDP_Po2[i,1]
+  
+  if(c1 == "NEW ZEALAND"){
+    grid.text(c1, x=unit(EQ_GDP_Po2[i,9]-12, "native"), y=unit(EQ_GDP_Po2[i,8]-3, "native"), gp=gpar(col = 'white', fontsize=9))
+  }else{
+    grid.text(c1, x=unit(EQ_GDP_Po2[i,9]+1, "native"), y=unit(EQ_GDP_Po2[i,8]-2, "native"),rot =45, gp=gpar(col = 'white', fontsize=9))
+  }
+   
+}
+grid.text("Longitude",x=unit(0,"native"),y=unit(-65,"native"),gp=gpar(col="white",fontsize=14))
+grid.text("Latitude",x=unit(-175,"native"),y=unit(0,"native"),rot=90,gp=gpar(col="white",fontsize=14))
+
+kk=100000
+for (i in 1 : 5){
+  
+  grid.circle(x=unit(-155,"native"), y=unit(75,"native"), r=log2(kk)/200, default.units="npc", name=NULL,
+            gp = gpar(col = 'thistle1',fill="black"), draw=TRUE)
+  kkk=as.character(kk)
+  grid.text(kkk, x=unit((-155+22), "native"), y=unit(75 +(i-1)*3.2-13, "native"), gp=gpar(col = 'thistle1', fontsize=8,fontface = "bold"))
+  kk=kk/10
+}
+grid.text("Death", x=unit((-155-5), "native"), y=unit(75 -17, "native"), gp=gpar(col = 'hotpink1', fontsize=10,fontface = "bold"))
+
+
+kk=500
+for (i in 1 : 7){
+  hh = sqrt(kk)*0.25
+  grid.lines(x = unit(-179 + 2*i, "native"), y = unit(c(-69, -69+hh), "native"), arrow = arrow(length=unit(4,"native")),gp = gpar(col = 'yellow', lwd=1))
+  kkk <- as.character(kk)
+  grid.text(kkk, x=unit((-176 + (i-1)*2), "native"), y=unit(-48 +(i-1)*3.2, "native"), gp=gpar(col = 'gold', fontsize=8,fontface = "bold"))
+  kk=500*5*i
+}
+grid.text("GDP", x=unit(-165, "native"), y=unit(-50 +27, "native"), gp=gpar(col = 'gold', fontsize=10,fontface = "bold"))
+
+for (i in 1 : 6){
+  kk=500*i^3
+  hh = sqrt(kk)*0.12
+  grid.lines(x = unit(-150 + 2*i, "native"), y = unit(c(-69, -69+hh), "native"), arrow = arrow(length=unit(4,"native")),gp = gpar(col = 'green', lwd=1))
+  kkk <- as.character(kk)
+  grid.text(kkk, x=unit((-157 + (i-1)*2), "native"), y=unit(-50 +(i-1)*3.2, "native"), gp=gpar(col = 'limegreen', fontsize=8,fontface = "bold"))
+}
+grid.text("Damage", x=unit(-145, "native"), y=unit(-50 +25, "native"), gp=gpar(col = 'limegreen', fontsize=10,fontface = "bold"))
+
+grid.xaxis(gp=gpar(fontsize=12))
+grid.yaxis(gp=gpar(fontsize=12))
+
+```
+Figure 10: Summary figure. 14 countries selected from figure 4 were plotted against 6 basic parameters we used in this project. Circle size: average death toll, circle color: with (blue) or without (red) seismic code enforcement$^{13-15}$, blue/red bars on top/bottom of the figure: average magnitude, countries as labeled, green arrow: average damage in million $ (1967-2017), yellow arrow: average GDP/capita (1967-2016), pink arrow: vector sum of green and yellow arrow. All the countries are labeled by the longitude (x-axis) and latitude (y-axis). Background white dots are earthquakes with magnitude bigger than 5.5 since 1965.
+
+#V. Reference
+1. Data.gov. (2015, Nov. 10). Retrieved from https://catalog.data.gov/dataset/earthquake-damage-general
+2. National Earthquake Information Center, (2017, Feb). Retrieved from https://www.kaggle.com/usgs/earthquake-database
+3. National Oceanic and Atmospheric Administration, (n.d.) Retrieved from https://www.ngdc.noaa.gov/nndc/struts/form?t=101650&s=1&d=1
+4. The World Bank. (2017). Retrieved from https://data.worldbank.org/indicator/NY.GDP.PCAP.CD
+5. United States Geological Survey. (2017, Nov. 10) Retrieved from https://earthquake.usgs.gov/earthquakes/search/
+6. Max Watson's Edexcel IGCSE Course. (2015, Nov. 17) Retrieved from https://maxwatsongeography.wordpress.com/section-a/hazardous-environments/fault-linesplate-boundaries/
+7. Anne E. Egger, Ph.D. Plates, Plate Boundaries, and Driving Forces Visionlearning Vol. EAS (2), (2003)
+8. Investopedia (2016, Sep. 28). Retrieved from http://www.investopedia.com/updates/top-developing-countries/
+9. Federal Reserve Bank of Kansas City (n.d) Retrieved from https://www.kansascityfed.org/publications/research/oke/articles/2016/economic-damage-large-earthquakes
+10. Cohen, J. (1988). Statistical power analysis for the behavioral sciences (2nd ed.). New Jersey: Lawrence Erlbaum
+11. Nienhuys, S. Seismic Building Codes: Global and Regional Overview. Evidence on Demand, UK iv 37 pp, (2015)
+12. Central America Data (2012, Nov 12) Retrieved from https://www.centralamericadata.com/en/article/home/Guatemala_Lacks_a_Building_Code
+13. Plumer, B. (2015, Apr 27 ) Retrieved from https://www.vox.com/2015/4/27/8501281/earthquake-risk
+14. Dolce, M. SEISMIC SAFETY OF SCHOOLS IN ITALY. Retrieved from http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.174.8833
+15. Tsai, K.C et al. (2009). Development of seismic force requirements for buildings in Taiwan. Earthq Eng & Eng Vib   (2009) 8: 349-358.
+16. Yukiyasu, K. (n.d) Historical Measures for Earthquake Resistant Buildingsin Japan. Retrieved from http://pubdocs.worldbank.org/en/323471465185765105/031716-DRMSeminar8-BuildingRegulation-YukiyasuKamemura.pdf
+17. Creating Earthquake-Resistant Buildings (2102, Feb) The university of Tokyo magazine (10). Retrieved from http://www.u-tokyo.ac.jp/en/about/publications/tansei/10/75-recovery-buildings.html
+
